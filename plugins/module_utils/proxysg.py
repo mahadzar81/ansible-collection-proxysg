@@ -65,19 +65,31 @@ class NotTextNodeError: pass
 
 # ------------------------------------------------------------------------------
 
-def getTextFromNode (node):
-	'''
-	Scans through all children of node and gathers the text. if node has
-	non-text child-nodes, then NotTextNodeError is raised.
-	'''
-	t = ""
-	for n in node.childNodes:
-		if n.nodeType == n.TEXT_NODE:
-			t += n.nodeValue
-		else:
-			raise NotTextNodeError
-	return t
+def getTextFromNode(node):
+    """
+    Scans through all children of the node and gathers the text. 
+    If the node has non-text child-nodes, then NotTextNodeError is raised.
+    
+    Args:
+        node: The DOM node to extract text from.
+        
+    Returns:
+        str: The concatenated text from all child nodes.
+        
+    Raises:
+        NotTextNodeError: If a non-text node is encountered.
+    """
+    if not node.hasChildNodes():
+        return ""
 
+    text_content = []
+    for child in node.childNodes:
+        if child.nodeType == child.TEXT_NODE:
+            text_content.append(child.nodeValue)
+        else:
+            raise NotTextNodeError("Non-text node encountered: {}".format(child.nodeName))
+    
+    return ''.join(text_content).strip()
 
 # ------------------------------------------------------------------------------
 
