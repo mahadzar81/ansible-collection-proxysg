@@ -93,185 +93,166 @@ def getTextFromNode(node):
 
 # ------------------------------------------------------------------------------
 
-def nodeToDictionary (node):
-	'''
-    nodeToDic() scans through the children of node and makes a
-    dictionary from the content.
-    three cases are differentiated:
-	- if the node contains no other nodes, it is a text-node
-    and {nodeName:text} is merged into the dictionary.
-	- if the node has the attribute "method" set to "true",
-    then it's children will be appended to a list and this
-    list is merged to the dictionary in the form: {nodeName:list}.
-	- else, nodeToDic() will call itself recursively on
-    the nodes children (merging {nodeName:nodeToDic()} to
-    the dictionary).
-    '''
-	dic = {}
-	ix = 1
-	for n in node.childNodes:
-		if n.nodeType != n.ELEMENT_NODE:
-			continue
-		if n.getAttribute("multiple") == "true":
-			# node with multiple children:
-			# put them in a list
-			l = []
-			for c in n.childNodes:
-				if c.nodeType != n.ELEMENT_NODE:
-					continue
-				l.append(nodeToDictionary(c))
-				dic.update({u.nodeName:l})
-			continue
-			
-		try:
-			text = getTextFromNode(n)
-		except NotTextNodeError:
-			# 'normal' node
-			nm = n.nodeName
-			if nm == 'cmd':
-				nm = 'cmd{}'.format(ix)
-				ix+= 1
-			dic.update({nm:nodeToDictionary(n)})
-			continue
-	
-		# text node
-		dic.update({n.nodeName:text})
-		continue
-	return dic
+def node_to_dictionary(node):
+    """
+    Scans through the children of a node and creates a dictionary from the content.
+
+    Three cases are differentiated:
+    - If the node contains no other nodes, it is a text-node, and {nodeName: text} is merged into the dictionary.
+    - If the node has the attribute "multiple" set to "true", its children will be appended to a list,
+      and this list is merged to the dictionary in the form: {nodeName: list}.
+    - Otherwise, the function recursively calls itself on the node's children (merging {nodeName: node_to_dictionary()} 
+      into the dictionary).
+    """
+    dic = {}
+    ix = 1
+
+    for n in node.childNodes:
+        if n.nodeType != n.ELEMENT_NODE:
+            continue
+
+        if n.getAttribute("multiple") == "true":
+            # Node with multiple children: put them in a list
+            child_list = [node_to_dictionary(c) for c in n.childNodes if c.nodeType == n.ELEMENT_NODE]
+            dic[n.nodeName] = child_list
+            continue
+
+        try:
+            text = get_text_from_node(n)
+        except NotTextNodeError:
+            # 'Normal' node
+            node_name = f'cmd{ix}' if n.nodeName == 'cmd' else n.nodeName
+            if n.nodeName == 'cmd':
+                ix += 1
+            dic[node_name] = node_to_dictionary(n)
+            continue
+
+        # Text node
+        dic[n.nodeName] = text
+
+    return dic
 
 
 # ------------------------------------------------------------------------------
 
 class QDExpect:
-	'''
-	Duplicates the functions of telnetlib's expect function for the
-	paramiko SSH connction libraries
-	'''
-		
-	def __init__ (self, channel):
-		'''channel - a paramiko channel object invoking shell'''
-		
-		self.buffer = ''
-		self.channel = channel
-		self.expect_write = self.channel.send
-		self.expect_read = self.channel.recv
-		self.fileno = self.channel.fileno
+    """
+    Duplicates the functions of telnetlib's expect function for the
+    paramiko SSH connection libraries.
+    """
 
-	def fill_buffer (self):
-		self.buffer = self.buffer + self.expect_read2 (1024)
+    def __init__(self, channel):
+        """
+        channel - a paramiko channel object invoking shell.
+        """
+        self.buffer = ''
+        self.channel = channel
+        self.expect_write = self.channel.send
+        self.expect_read = self.channel.recv
+        self.fileno = self.channel.fileno
 
-	def expect (self, reList, timeout=10):
-		'''
-		Read until one from a list of regular expresssions matches.
-		reList - list of regular expressions, either compiled or strings, single or list
-		timeout - optional timeout in seconds
-		Returns: (match_list_index, match_object, text_before_match)
-		'''
+    def fill_buffer(self):
+        self.buffer += self.expect_read(1024)
 
-		timeout_time = time.time() + timeout
+    def expect(self, re_list, timeout=10):
+        """
+        Read until one from a list of regular expressions matches.
+        re_list - list of regular expressions, either compiled or strings, single or list.
+        timeout - optional timeout in seconds.
+        Returns: (match_list_index, match_object, text_before_match)
+        """
+        timeout_time = time.time() + timeout
 
-		if type(reList) == types.ListType or type(reList) == types.TupleType:
-			reList = reList[:]
-		else:
-			reList = [reList]
+        if not isinstance(re_list, (list, tuple)):
+            re_list = [re_list]
 
-		indices = range(len(reList))
-		for i in indices:
-			if not hasattr ( reList[i], "search" ):
-				reList[i] = re.compile (reList[i])
-		while 1:
-			for i in indices:
-				mo = reList[i].search (self.buffer)
-				if mo:
-					text_before = self.buffer[:mo.start()]
-					self.buffer = self.buffer[mo.end():]
-					return i, mo, text_before
+        re_list = [re.compile(r) if not hasattr(r, 'search') else r for r in re_list]
+        indices = range(len(re_list))
 
-			this_timeout = timeout_time - time.time ()
-			if this_timeout <= 0: return -1, None, None
-			selectin, selectout, selectexcept = select.select ([self], [], [], this_timeout)
-			if len (selectin) == 0: return -1, None, None
-			self.fill_buffer ()
+        while True:
+            for i in indices:
+                match_object = re_list[i].search(self.buffer)
+                if match_object:
+                    text_before = self.buffer[:match_object.start()]
+                    self.buffer = self.buffer[match_object.end():]
+                    return i, match_object, text_before
 
-	def expect_read2 (self, max_size=None):
-		data = self.expect_read (max_size)
-		return data
+            this_timeout = timeout_time - time.time()
+            if this_timeout <= 0:
+                return -1, None, None
 
-	def	read (self, max_size=None):
-		if self.buffer:
-			if max_size:
-				size = min (max_size, len(self.buffer))
-			else:
-				size = len (self.buffer)
-			data = self.buffer[:size]
-			self.buffer = self.buffer[size:]
-			return data
-		else:
-			return self.expect_read2 (max_size)
+            select_in, _, _ = select.select([self], [], [], this_timeout)
+            if not select_in:
+                return -1, None, None
+            self.fill_buffer()
 
-	def write (self, data):
-		self.expect_write (data)
+    def expect_read(self, max_size=None):
+        return self.channel.recv(max_size)
 
-	def close (self):
-		pass
+    def read(self, max_size=None):
+        if self.buffer:
+            size = min(max_size, len(self.buffer)) if max_size else len(self.buffer)
+            data = self.buffer[:size]
+            self.buffer = self.buffer[size:]
+            return data
+        return self.expect_read(max_size)
+
+    def write(self, data):
+        self.expect_write(data)
+
+    def close(self):
+        pass
 
 # ------------------------------------------------------------------------------
 
 class ProxyCommon:
-	'''Common routines for ProxySGCLI and ProxySGHTTP'''
+    '''Common routines for ProxySGCLI and ProxySGHTTP'''
 
-	# --------------------------------------------------------------------------
+    def wait(self, init_wait=15, ping_wait=300, end_wait=15):
+        """
+        Wait for device to boot.
+        init_wait - hold time before checking with ping.
+        ping_wait - how long to wait for a ping.
+        end_wait  - hold time before releasing back to main script.
+        return: (status, status_text)
+        """
+        time.sleep(init_wait)
+        timer = 0
+        if self.aspects.ipaddr is None:
+            raise ValueError('Need IP address to ping')
+        while not self._ping(self.aspects.ipaddr):
+            timer += 2
+            if timer > ping_wait:
+                raise TimeoutError('Wait for boot failed timeout')
+        time.sleep(end_wait)
+        return True
 
-	def wait (self, initWait=15, pingWait=300, endWait=15):
-		'''
-		Wait for device to boot
-		initWait - hold time before checking with ping
-		pingWait - how long to wait for a ping
-		endWait  - hold time before releasing back to main script
-		return: (status, status_text)
-		'''
+    def _ping(self, ip):
+        """
+        Ping (private routine) once.
+        return: True - successful ping, False - no ping returned in 2 seconds.
+        """
+        ping_commands = {
+            "sunos":   ('ping {} 5 | grep alive >/dev/null', 0),
+            "freebsd": ("ping -c 1 -t 2 {} | grep -E '1 packets received' >/dev/null", 0),
+            "darwin":  ("ping -c 1 -t 2 {} | grep -E '1 packets received' >/dev/null", 0),
+            "linux":   ("ping -c 1 -W 2 {} | grep -E '1 received' >/dev/null', 0),
+            "linux2":  ("ping -c 1 -W 2 {} | grep -E '1 received' >/dev/null', 0),
+            "windows": ("ping -n 1 -w 2000 {} | grep -E '1 (packets )?received' >/dev/null", 0),
+            "win32":   ('ping -n 1 -w 2000 {} | find /I "Received = 1"', 0),
+        }
+        os_type = sys.platform
+        if os_type not in ping_commands:
+            raise ValueError(f"Don't know how to ping on {os_type}")
+        command, expected_value = ping_commands[os_type]
+        return os.system(command.format(ip)) == expected_value
 
-		time.sleep (initWait)
-		iTimer = 0
-		if self.aspects.ipaddr == None: raise Error ('Need IP address to ping')
-		while self._aPing (self.aspects.ipaddr) == False:
-			iTimer += 2
-			if (iTimer > pingWait):
-				raise Error ('Wait for boot failed timeout')
-		time.sleep (endWait)
-		return True
-	
-	# --------------------------------------------------------------------------
-
-	def _aPing (self, sIP):
-		'''
-		Ping (private routine) one... ping... only
-		return: True - successful ping, False - no ping returned in 2 seconds
-		'''
-		
-		pingCommands = { # ('ping command and grep', passing_return_value)
-			"sunos":   ('ping {} 5 | grep alive >/dev/null', 0),
-			"freebsd": ("ping -c 1 -t 2 {} | grep -E '1 packets received' >/dev/null", 0),
-			"darwin":  ("ping -c 1 -t 2 {} | grep -E '1 packets received' >/dev/null", 0),
-			"linux":   ("ping -c 1 -W 2 {} | grep -E '1 received' >/dev/null", 0),
-			'linux2':  ("ping -c 1 -W 2 {} | grep -E '1 received' >/dev/null", 0),
-			"windows": ("ping -n 1 -w 2000 {} | grep -E '1 (packets )?received' >/dev/null", 0),
-			"win32":   ('ping -n 1 -w 2000 {} | find /I "Received = 1"', 0),
-			}
-		tos = sys.platform
-		if tos not in pingCommands.keys(): raise Error ("Don't know how to PING on "+tos)
-		command, value = pingCommands[tos]
-		return os.system (command.format(sIP)) == value
-
-	# --------------------------------------------------------------------------
-	
-	def checkForName (self, aspects, name):
-		'''Check for existance of an aspect, return value'''
-		value = aspects.get(name)
-		if value == None:
-			raise Error ('Need aspect: ' + name)
-		return value
-
+    def check_for_name(self, aspects, name):
+        """Check for existence of an aspect, return value."""
+        value = aspects.get(name)
+        if value is None:
+            raise ValueError(f'Need aspect: {name}')
+        return value
 
 # ------------------------------------------------------------------------------
 
